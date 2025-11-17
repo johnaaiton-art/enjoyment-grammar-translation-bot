@@ -279,11 +279,12 @@ application.add_handler(CommandHandler("quiz", quiz))
 application.add_handler(CallbackQueryHandler(send_sentence))
 
 @app.route("/webhook", methods=["POST"])
-async def telegram_webhook():
+def telegram_webhook():
     try:
         if request.headers.get("content-type") == "application/json":
             update = Update.de_json(request.get_json(), application.bot)
-            await application.update_queue.put(update)
+            # Process update synchronously
+            application.process_update(update)
         return jsonify({"ok": True})
     except Exception as e:
         logger.error(f"Webhook error: {e}")
@@ -295,7 +296,7 @@ def home():
 
 async def set_webhook():
     if RAILWAY_STATIC_URL:
-        url = f"{RAILWAY_STATIC_URL}/webhook"
+        url = f"https://{RAILWAY_STATIC_URL}/webhook"
         await application.bot.set_webhook(url=url)
         logger.info(f"✅ Webhook set to: {url}")
     else:
