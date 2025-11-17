@@ -33,7 +33,10 @@ except ValueError:
 
 PORT = int(os.getenv("PORT", 8000))
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
@@ -191,11 +194,15 @@ def generate_russian_sentence(desc: str) -> str:
 
 # --- Telegram Handlers ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Start command received from user {update.effective_user.id}")
     await update.message.reply_text(
         "Привет! Напиши /quiz здесь (в личном чате), чтобы выбрать предложения для отправки в группу."
     )
 
 async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    logger.info(f"Quiz command received from user {user_id}")
+    
     if not TARGET_CHAT_ID:
         await update.message.reply_text("❌ TARGET_CHAT_ID не настроен.")
         return
@@ -229,6 +236,7 @@ async def send_sentence(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             await query.message.edit_reply_markup(reply_markup=None)
             await query.message.reply_text("✅ Отправлено в группу!")
+            logger.info(f"Sentence sent to group {TARGET_CHAT_ID}")
         else:
             await query.message.edit_text("❌ Предложение не найдено.")
     except Exception as e:
@@ -272,19 +280,30 @@ def start_scheduler():
     scheduler.start()
     logger.info("⏰ Reminder scheduler started (10:00 & 16:00 UTC).")
 
-# --- Flask & Webhook ---
+# --- Initialize Telegram Application ---
 application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("quiz", quiz))
 application.add_handler(CallbackQueryHandler(send_sentence))
+
+# Store the event loop for async processing
+event_loop = None
 
 @app.route("/webhook", methods=["POST"])
 def telegram_webhook():
     try:
         if request.headers.get("content-type") == "application/json":
             update = Update.de_json(request.get_json(), application.bot)
-            # Process update synchronously
-            application.process_update(update)
+            
+            # Process update asynchronously in the existing event loop
+            if event_loop:
+                asyncio.run_coroutine_threadsafe(
+                    application.process_update(update), 
+                    event_loop
+                )
+            else:
+                logger.error("Event loop not initialized")
+                
         return jsonify({"ok": True})
     except Exception as e:
         logger.error(f"Webhook error: {e}")
@@ -294,24 +313,35 @@ def telegram_webhook():
 def home():
     return "✅ Grammar + Reminder Bot is running!"
 
-async def set_webhook():
+async def setup_webhook():
+    """Set up the webhook asynchronously"""
     if RAILWAY_STATIC_URL:
-        url = f"https://{RAILWAY_STATIC_URL}/webhook"
-        await application.bot.set_webhook(url=url)
-        logger.info(f"✅ Webhook set to: {url}")
+        webhook_url = f"https://{RAILWAY_STATIC_URL}/webhook"
+        await application.bot.set_webhook(
+            url=webhook_url,
+            # drop_pending_updates=True  # Uncomment if you want to clear pending updates
+        )
+        logger.info(f"✅ Webhook set to: {webhook_url}")
     else:
-        logger.warning("⚠️ RAILWAY_STATIC_URL not set — webhook not active!")
+        logger.warning("⚠️ RAILWAY_STATIC_URL not set — using polling fallback")
 
-# --- Run ---
-if __name__ == "__main__":
-    # Set webhook
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(set_webhook())
-    loop.close()
+async def main():
+    """Main async setup function"""
+    await application.initialize()
+    await setup_webhook()
+    await application.start()
     
     # Start reminder scheduler
     start_scheduler()
     
+    logger.info("🤖 Bot is fully initialized and ready!")
+
+# --- Run ---
+if __name__ == "__main__":
+    # Run the async setup
+    event_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(event_loop)
+    event_loop.run_until_complete(main())
+    
     # Start Flask
-    app.run(host="0.0.0.0", port=PORT)
+    app.run(host="0.0.0.0", port=PORT, debug=False)
