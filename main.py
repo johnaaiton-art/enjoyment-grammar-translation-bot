@@ -1,12 +1,9 @@
 import os
 import random
 import requests
-from flask import Flask, request, jsonify
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 import logging
-import asyncio
-
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 import pytz
@@ -14,32 +11,24 @@ import pytz
 # --- Configuration ---
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
-RAILWAY_STATIC_URL = os.getenv("RAILWAY_STATIC_URL")
 
-TARGET_CHAT_ID = os.getenv("TARGET_CHAT_ID")        # Group with Elena
-REMINDER_CHAT_ID = os.getenv("REMINDER_CHAT_ID")    # Your private reminder group
+TARGET_CHAT_ID = os.getenv("TARGET_CHAT_ID")
+REMINDER_CHAT_ID = os.getenv("REMINDER_CHAT_ID")
 
-# Validate required env vars
-if not TELEGRAM_BOT_TOKEN or not DEEPSEEK_API_KEY:
-    raise RuntimeError("❌ Missing TELEGRAM_BOT_TOKEN or DEEPSEEK_API_KEY")
-
+# Convert chat IDs to integers
 try:
     if TARGET_CHAT_ID:
         TARGET_CHAT_ID = int(TARGET_CHAT_ID)
     if REMINDER_CHAT_ID:
         REMINDER_CHAT_ID = int(REMINDER_CHAT_ID)
-except ValueError:
-    raise RuntimeError("❌ Chat IDs must be integers (e.g., -1001234567890)")
-
-PORT = int(os.getenv("PORT", 8000))
+except (ValueError, TypeError):
+    pass  # Handle None values gracefully
 
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
-
-app = Flask(__name__)
 
 # --- Grammar Structures (from your PDF) ---
 GRAMMAR_STRUCTURES = [
@@ -194,14 +183,14 @@ def generate_russian_sentence(desc: str) -> str:
 
 # --- Telegram Handlers ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"Start command received from user {update.effective_user.id}")
+    logger.info(f"Start command from user {update.effective_user.id}")
     await update.message.reply_text(
         "Привет! Напиши /quiz здесь (в личном чате), чтобы выбрать предложения для отправки в группу."
     )
 
 async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    logger.info(f"Quiz command received from user {user_id}")
+    logger.info(f"Quiz command from user {user_id}")
     
     if not TARGET_CHAT_ID:
         await update.message.reply_text("❌ TARGET_CHAT_ID не настроен.")
@@ -219,7 +208,7 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
         buttons.append([InlineKeyboardButton(label, callback_data=f"send_{i}")])
 
     await update.message.reply_text(
-        f"Выбери, что отправить в группу:",
+        "Выбери, что отправить в группу:",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
 
@@ -246,25 +235,28 @@ async def send_sentence(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- Reminder Scheduler ---
 def send_reminder():
     if not REMINDER_CHAT_ID:
-        logger.debug("REMINDER_CHAT_ID not set — skipping reminder.")
         return
     
     en, he, trans = random.choice(REMINDER_MESSAGES)
     text = f"{en}\n*{he}*\n_{trans}_"
     
     try:
-        # Use asyncio to send message from sync scheduler
+        # Create new event loop for each reminder
+        import asyncio
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        loop.run_until_complete(
-            application.bot.send_message(
+        
+        async def send_async():
+            bot = Application.builder().token(TELEGRAM_BOT_TOKEN).build().bot
+            await bot.send_message(
                 chat_id=REMINDER_CHAT_ID, 
                 text=text, 
                 parse_mode="Markdown"
             )
-        )
+        
+        loop.run_until_complete(send_async())
         loop.close()
-        logger.info("✅ Reminder sent to private group.")
+        logger.info("✅ Reminder sent")
     except Exception as e:
         logger.error(f"Failed to send reminder: {e}")
 
@@ -274,74 +266,27 @@ def start_scheduler():
         return
     
     scheduler = BackgroundScheduler(timezone=pytz.utc)
-    # ⏰ 10:00 and 16:00 UTC (adjust for your timezone if needed)
     scheduler.add_job(send_reminder, CronTrigger(hour=10, minute=0, timezone=pytz.utc))
     scheduler.add_job(send_reminder, CronTrigger(hour=16, minute=0, timezone=pytz.utc))
     scheduler.start()
-    logger.info("⏰ Reminder scheduler started (10:00 & 16:00 UTC).")
+    logger.info("⏰ Reminder scheduler started")
 
-# --- Initialize Telegram Application ---
-application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-application.add_handler(CommandHandler("start", start))
-application.add_handler(CommandHandler("quiz", quiz))
-application.add_handler(CallbackQueryHandler(send_sentence))
-
-# Store the event loop for async processing
-event_loop = None
-
-@app.route("/webhook", methods=["POST"])
-def telegram_webhook():
-    try:
-        if request.headers.get("content-type") == "application/json":
-            update = Update.de_json(request.get_json(), application.bot)
-            
-            # Process update asynchronously in the existing event loop
-            if event_loop:
-                asyncio.run_coroutine_threadsafe(
-                    application.process_update(update), 
-                    event_loop
-                )
-            else:
-                logger.error("Event loop not initialized")
-                
-        return jsonify({"ok": True})
-    except Exception as e:
-        logger.error(f"Webhook error: {e}")
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-@app.route("/")
-def home():
-    return "✅ Grammar + Reminder Bot is running!"
-
-async def setup_webhook():
-    """Set up the webhook asynchronously"""
-    if RAILWAY_STATIC_URL:
-        webhook_url = f"https://{RAILWAY_STATIC_URL}/webhook"
-        await application.bot.set_webhook(
-            url=webhook_url,
-            # drop_pending_updates=True  # Uncomment if you want to clear pending updates
-        )
-        logger.info(f"✅ Webhook set to: {webhook_url}")
-    else:
-        logger.warning("⚠️ RAILWAY_STATIC_URL not set — using polling fallback")
-
-async def main():
-    """Main async setup function"""
-    await application.initialize()
-    await setup_webhook()
-    await application.start()
+# --- Main Bot Setup ---
+def main():
+    """Start the bot with polling"""
+    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     
-    # Start reminder scheduler
+    # Add handlers
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("quiz", quiz))
+    application.add_handler(CallbackQueryHandler(send_sentence))
+    
+    # Start scheduler
     start_scheduler()
     
-    logger.info("🤖 Bot is fully initialized and ready!")
+    # Start polling
+    logger.info("🤖 Starting bot with polling...")
+    application.run_polling()
 
-# --- Run ---
 if __name__ == "__main__":
-    # Run the async setup
-    event_loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(event_loop)
-    event_loop.run_until_complete(main())
-    
-    # Start Flask
-    app.run(host="0.0.0.0", port=PORT, debug=False)
+    main()
