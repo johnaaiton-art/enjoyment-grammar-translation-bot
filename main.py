@@ -7,6 +7,7 @@ import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 import pytz
+import asyncio
 
 # --- Configuration ---
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -181,6 +182,16 @@ def generate_russian_sentence(desc: str) -> str:
             "Ты когда-нибудь был в Лондоне?"
         ])
 
+# Store active quizzes with their expiration time
+active_quizzes = {}
+
+async def cleanup_quiz(chat_id: int, delay: int = 30):
+    """Remove quiz after delay"""
+    await asyncio.sleep(delay)
+    if chat_id in active_quizzes:
+        del active_quizzes[chat_id]
+        logger.info(f"Quiz expired for chat {chat_id}")
+
 # --- Telegram Handlers ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Start command from user {update.effective_user.id}")
@@ -190,6 +201,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
     logger.info(f"Quiz command from user {user_id}")
     
     if not TARGET_CHAT_ID:
@@ -200,37 +212,95 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     prompts = random.sample(GRAMMAR_STRUCTURES, 6)
     sentences = [generate_russian_sentence(p) for p in prompts]
-    context.user_data["sentences"] = sentences
-
+    
+    # Store sentences and create buttons
+    active_quizzes[chat_id] = {
+        'sentences': sentences,
+        'sent_count': 0,
+        'message_id': None
+    }
+    
+    # Create buttons - each button shows the full sentence
     buttons = []
     for i, sent in enumerate(sentences):
-        label = (sent[:22] + "…") if len(sent) > 22 else sent
-        buttons.append([InlineKeyboardButton(label, callback_data=f"send_{i}")])
-
-    await update.message.reply_text(
-        "Выбери, что отправить в группу:",
+        # Show full sentence in button (Telegram will handle wrapping)
+        buttons.append([InlineKeyboardButton(f"📝 {sent}", callback_data=f"send_{i}")])
+    
+    # Add a "Finish" button
+    buttons.append([InlineKeyboardButton("✅ Готово", callback_data="finish")])
+    
+    message = await update.message.reply_text(
+        "🎯 **Выбери предложения для отправки в группу:**\n\n"
+        "• Нажми на предложение чтобы отправить его\n"
+        "• Кнопки активны 30 секунд\n"
+        "• Нажми '✅ Готово' когда закончишь",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
+    
+    # Store message ID for later editing
+    active_quizzes[chat_id]['message_id'] = message.message_id
+    
+    # Schedule cleanup after 30 seconds
+    asyncio.create_task(cleanup_quiz(chat_id))
 
 async def send_sentence(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    
+    chat_id = query.message.chat_id
+    
+    if chat_id not in active_quizzes:
+        await query.edit_message_text("❌ Время вышло! Используй /quiz чтобы начать заново.")
+        return
+    
+    if query.data == "finish":
+        sent_count = active_quizzes[chat_id]['sent_count']
+        await query.edit_message_text(f"✅ Отправлено предложений: {sent_count}\n\nИспользуй /quiz для нового набора.")
+        if chat_id in active_quizzes:
+            del active_quizzes[chat_id]
+        return
+    
     try:
         idx = int(query.data.split("_")[1])
-        sentences = context.user_data.get("sentences", [])
+        quiz_data = active_quizzes[chat_id]
+        sentences = quiz_data['sentences']
+        
         if 0 <= idx < len(sentences):
+            # Send to target group
             await context.bot.send_message(
                 chat_id=TARGET_CHAT_ID,
                 text=sentences[idx]
             )
-            await query.message.edit_reply_markup(reply_markup=None)
-            await query.message.reply_text("✅ Отправлено в группу!")
-            logger.info(f"Sentence sent to group {TARGET_CHAT_ID}")
+            
+            # Update counter
+            quiz_data['sent_count'] += 1
+            sent_count = quiz_data['sent_count']
+            
+            # Update the message to show progress but KEEP THE BUTTONS
+            remaining_time = "⏳ ~25 сек"
+            await query.edit_message_text(
+                f"🎯 **Отправлено: {sent_count}/6** • {remaining_time}\n\n"
+                "• Нажми на предложение чтобы отправить его\n"
+                "• Кнопки активны 30 секунд\n" 
+                "• Нажми '✅ Готово' когда закончишь",
+                reply_markup=query.message.reply_markup
+            )
+            
+            # Send confirmation separately
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"✅ Отправлено: _{sentences[idx]}_",
+                parse_mode="Markdown"
+            )
+            
+            logger.info(f"Sentence {idx} sent to group {TARGET_CHAT_ID}")
+            
         else:
-            await query.message.edit_text("❌ Предложение не найдено.")
+            await query.answer("❌ Предложение не найдено", show_alert=True)
+            
     except Exception as e:
         logger.error(f"Send error: {e}")
-        await query.message.edit_text("❌ Ошибка при отправке.")
+        await query.answer("❌ Ошибка при отправке", show_alert=True)
 
 # --- Reminder Scheduler ---
 def send_reminder():
@@ -242,7 +312,6 @@ def send_reminder():
     
     try:
         # Create new event loop for each reminder
-        import asyncio
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
