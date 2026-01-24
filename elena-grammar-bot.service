@@ -1,0 +1,16 @@
+[Unit]
+Description=Elena Grammar Bot (Enjoyment Reminder)
+After=network.target
+
+[Service]
+Type=simple
+User=yc-user
+WorkingDirectory=/home/yc-user/enjoyment_reminder
+Environment="PATH=/home/yc-user/enjoyment_reminder/venv/bin"
+EnvironmentFile=/home/yc-user/enjoyment_reminder/.env
+ExecStart=/home/yc-user/enjoyment_reminder/venv/bin/python main.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

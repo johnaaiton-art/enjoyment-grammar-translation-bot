@@ -1,0 +1,39 @@
+# Elena Grammar Bot - Environment Variables Configuration
+# Copy this file to .env and fill in your actual values
+
+# === REQUIRED ===
+
+# Your Telegram Bot Token (get from @BotFather)
+TELEGRAM_BOT_TOKEN=1234567890:ABCdefGHIjklMNOpqrsTUVwxyz
+
+# Your DeepSeek API Key (get from platform.deepseek.com)
+DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# === STUDENT CHATS ===
+
+# Option 1: Comma-separated list of chat IDs (EASIEST METHOD)
+# Positive numbers = private chats, Negative numbers = groups
+# Example: TARGET_CHAT_IDS=123456789,-987654321,111222333
+TARGET_CHAT_IDS=
+
+# Option 2: Edit TARGET_CHATS list directly in elena_grammar_bot.py
+# If you use this option, leave TARGET_CHAT_IDS empty
+
+# === OPTIONAL ===
+
+# Your personal chat ID for reminder messages
+# Leave empty to disable reminders
+REMINDER_CHAT_ID=
+
+# === HOW TO GET CHAT IDs ===
+# 1. Add your bot to the chat
+# 2. Send a message in that chat
+# 3. Visit: https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getUpdates
+# 4. Look for "chat":{"id":123456789} in the response
+# 5. Copy that number here
+
+# === EXAMPLES ===
+# Elena's private chat: 123456789
+# Group with Maria: -987654321
+# Dmitry's chat: 444555666
+# Combined: TARGET_CHAT_IDS=123456789,-987654321,444555666
