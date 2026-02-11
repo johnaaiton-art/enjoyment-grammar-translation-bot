@@ -15,7 +15,8 @@ load_dotenv()
 
 # --- Configuration ---
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")  # Changed from DEEPSEEK_API_KEY
+YANDEX_FOLDER_ID = os.getenv("YANDEX_FOLDER_ID")  # Added
 REMINDER_CHAT_ID = os.getenv("REMINDER_CHAT_ID")
 
 # --- TARGET CHATS CONFIGURATION ---
@@ -141,49 +142,86 @@ REMINDER_MESSAGES = [
     )
 ]
 
-# --- DeepSeek: Generate simple Russian sentence with improved variety ---
+# --- YandexGPT: Generate simple Russian sentence with improved variety ---
 def generate_russian_sentence(desc: str) -> str:
+    """Generate Russian sentence using YandexGPT"""
+    
     # Build context about recently used topics to avoid
     avoid_topics = ""
     if recent_topics:
         avoid_topics = f"\n- AVOID these recently used topics/themes: {', '.join(recent_topics[-10:])}"
     
     prompt = f"""
-    You are an English teacher creating grammar practice.
-    Generate ONE clear Russian sentence that demonstrates this grammar structure.
-    
-    CRITICAL RULES:
-    - Use ONLY simple, everyday A2-B1 Russian vocabulary (no rare/advanced words).
-    - MUST use a completely different topic/scenario than common examples.
-    - Prioritize UNIQUE contexts: daily routines, emotions, technology, nature, health, food, transportation, relationships, entertainment, education, sports, culture, pets, holidays, etc.
-    - Include time markers like 'вчера', 'завтра', 'на прошлой неделе', 'в детстве' when appropriate.
-    - Be CREATIVE and VARIED - avoid clichés like umbrellas, studying, being late, etc.{avoid_topics}
-    - DO NOT include English, labels, or explanations.
-    - Output ONLY the Russian sentence, nothing else.
+You are an English teacher creating grammar practice.
+Generate ONE clear Russian sentence that demonstrates this grammar structure.
 
-    Grammar structure: {desc}
-    
-    Example of variety:
-    - Third conditional about forgetting umbrella ❌ (too common)
-    - Third conditional about calling grandmother ✅ (more unique)
-    - Third conditional about buying concert tickets ✅ (creative)
-    """
+CRITICAL RULES:
+- Use ONLY simple, everyday A2-B1 Russian vocabulary (no rare/advanced words).
+- MUST use a completely different topic/scenario than common examples.
+- Prioritize UNIQUE contexts: daily routines, emotions, technology, nature, health, food, transportation, relationships, entertainment, education, sports, culture, pets, holidays, hobbies, weather, shopping, work, family events, etc.
+- Include time markers like 'вчера', 'завтра', 'на прошлой неделе', 'в детстве' when appropriate.
+- Be CREATIVE and VARIED - avoid clichés like umbrellas, studying, being late, etc.{avoid_topics}
+- DO NOT include English, labels, or explanations.
+- Output ONLY the Russian sentence, nothing else.
+
+Grammar structure: {desc}
+
+Example of variety:
+- Third conditional about forgetting umbrella ❌ (too common)
+- Third conditional about calling grandmother ✅ (more unique)
+- Third conditional about buying concert tickets ✅ (creative)
+- Third conditional about planting tomatoes ✅ (specific and fresh)
+"""
     
     try:
-        res = requests.post(
-            "https://api.deepseek.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"},
-            json={
-                "model": "deepseek-chat",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.9,  # Increased from 0.8 for more variety
-                "max_tokens": 60
+        # YandexGPT API endpoint
+        url = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
+        
+        headers = {
+            "Authorization": f"Api-Key {YANDEX_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "modelUri": f"gpt://{YANDEX_FOLDER_ID}/yandexgpt-lite/latest",
+            "completionOptions": {
+                "stream": False,
+                "temperature": 0.9,  # High temperature for variety
+                "maxTokens": 100
             },
-            timeout=15
+            "messages": [
+                {
+                    "role": "user",
+                    "text": prompt
+                }
+            ]
+        }
+        
+        logger.info(f"Calling YandexGPT for: {desc[:50]}...")
+        
+        res = requests.post(
+            url,
+            headers=headers,
+            json=payload,
+            timeout=20
         )
-        sentence = res.json()['choices'][0]['message']['content'].strip()
-        for bad in ['"', '«', '»']:
+        
+        if res.status_code != 200:
+            logger.error(f"YandexGPT error: {res.status_code} - {res.text}")
+            raise Exception(f"YandexGPT returned {res.status_code}")
+        
+        response_data = res.json()
+        sentence = response_data['result']['alternatives'][0]['message']['text'].strip()
+        
+        # Clean up the sentence
+        for bad in ['"', '«', '»', '\n']:
             sentence = sentence.replace(bad, '')
+        
+        # Remove any English text that might have leaked through
+        # If the sentence contains English letters, it's probably not pure Russian
+        if any(c.isalpha() and ord(c) < 128 for c in sentence[:20]):
+            logger.warning(f"YandexGPT returned sentence with English: {sentence}")
+            raise Exception("Sentence contains English")
         
         # Extract topic keywords for tracking (simple approach)
         keywords = [word for word in sentence.split() if len(word) > 4][:3]
@@ -192,9 +230,12 @@ def generate_russian_sentence(desc: str) -> str:
             if len(recent_topics) > MAX_RECENT_TOPICS:
                 recent_topics[:] = recent_topics[-MAX_RECENT_TOPICS:]
         
+        logger.info(f"Generated sentence: {sentence}")
         return sentence
+        
     except Exception as e:
-        logger.error(f"DeepSeek error: {e}")
+        logger.error(f"YandexGPT error: {e}")
+        # Fallback sentences if API fails
         return random.choice([
             "Если бы я позвонил бабушке вчера, она была бы рада.",
             "Я собираюсь навестить друга в больнице завтра.",
