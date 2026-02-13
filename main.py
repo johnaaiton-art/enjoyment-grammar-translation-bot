@@ -15,32 +15,36 @@ load_dotenv()
 
 # --- Configuration ---
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")  # Changed from DEEPSEEK_API_KEY
-YANDEX_FOLDER_ID = os.getenv("YANDEX_FOLDER_ID")  # Added
+YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
+YANDEX_FOLDER_ID = os.getenv("YANDEX_FOLDER_ID")
 REMINDER_CHAT_ID = os.getenv("REMINDER_CHAT_ID")
 
 # --- TARGET CHATS CONFIGURATION ---
-# Easy way to add/remove student chats - just edit this list!
-# Format: (chat_id, "Student Name") - the name is just for your reference
+# NEW FORMAT: (chat_id, "Student Name", ["language_codes"])
+# Language codes: "ru" = Russian only, "es" = Spanish only
+# Use multiple languages to send sentence in each language sequentially
 TARGET_CHATS = [
-    # Add your student chats here:
-    # (123456789, "Elena"),
-    # (-987654321, "Maria"),
-    # (111222333, "Dmitry"),
+    # Examples:
+    # (-1001234567890, "Elena", ["ru"]),           # Russian only
+    # (-1009876543210, "Pedro", ["ru", "es"]),     # Russian then Spanish
+    # (-1005555555555, "Maria", ["ru", "es", "fr"]), # Russian, Spanish, then French
 ]
 
-# Alternative: Load from environment variable (comma-separated chat IDs)
-# This allows you to update without editing code - just change .env file
-env_chat_ids = os.getenv("TARGET_CHAT_IDS", "")
-if env_chat_ids:
+# Alternative: Load from environment variable
+# Format: "chat_id1:ru,chat_id2:ru+es,chat_id3:ru+es+fr"
+env_chat_config = os.getenv("TARGET_CHAT_CONFIG", "")
+if env_chat_config:
     try:
-        # Parse comma-separated IDs: "123456789,-987654321,111222333"
-        chat_ids = [int(cid.strip()) for cid in env_chat_ids.split(",") if cid.strip()]
-        # Add to TARGET_CHATS if not using the list above
-        if not TARGET_CHATS:
-            TARGET_CHATS = [(cid, f"Student_{i+1}") for i, cid in enumerate(chat_ids)]
+        # Parse: "-100123:ru,-100456:ru+es"
+        for entry in env_chat_config.split(","):
+            if ":" in entry:
+                chat_id_str, langs_str = entry.split(":", 1)
+                chat_id = int(chat_id_str.strip())
+                langs = [l.strip() for l in langs_str.split("+")]
+                TARGET_CHATS.append((chat_id, f"Student_{len(TARGET_CHATS)+1}", langs))
     except (ValueError, TypeError) as e:
-        logger.error(f"Error parsing TARGET_CHAT_IDS: {e}")
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error parsing TARGET_CHAT_CONFIG: {e}")
 
 # Convert REMINDER_CHAT_ID
 try:
@@ -217,18 +221,13 @@ Example of variety:
         for bad in ['"', '«', '»', '\n']:
             sentence = sentence.replace(bad, '')
         
-        # Remove any English text that might have leaked through
-        # If the sentence contains English letters, it's probably not pure Russian
-        if any(c.isalpha() and ord(c) < 128 for c in sentence[:20]):
-            logger.warning(f"YandexGPT returned sentence with English: {sentence}")
-            raise Exception("Sentence contains English")
-        
-        # Extract topic keywords for tracking (simple approach)
-        keywords = [word for word in sentence.split() if len(word) > 4][:3]
-        if keywords:
-            recent_topics.extend(keywords)
+        # Track topic to avoid repetition (extract first 2-3 words as rough topic)
+        words = sentence.split()
+        if len(words) >= 2:
+            topic = ' '.join(words[:2])
+            recent_topics.append(topic)
             if len(recent_topics) > MAX_RECENT_TOPICS:
-                recent_topics[:] = recent_topics[-MAX_RECENT_TOPICS:]
+                recent_topics.pop(0)
         
         logger.info(f"Generated sentence: {sentence}")
         return sentence
@@ -244,6 +243,77 @@ Example of variety:
             "Если пойдёт снег, мы слепим снеговика.",
             "Ты когда-нибудь пробовал узбекскую кухню?"
         ])
+
+def translate_sentence(text: str, target_lang: str) -> str:
+    """Translate Russian sentence to target language using YandexGPT"""
+    
+    lang_names = {
+        "es": "Spanish",
+        "fr": "French",
+        "de": "German",
+        "it": "Italian",
+        "pt": "Portuguese",
+        "ar": "Arabic",
+        "he": "Hebrew"
+    }
+    
+    lang_name = lang_names.get(target_lang, target_lang.upper())
+    
+    prompt = f"""Translate this Russian sentence to {lang_name}.
+Use simple, everyday vocabulary (A2-B1 level).
+Output ONLY the translated sentence, nothing else.
+
+Russian: {text}"""
+    
+    try:
+        url = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
+        
+        headers = {
+            "Authorization": f"Api-Key {YANDEX_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "modelUri": f"gpt://{YANDEX_FOLDER_ID}/yandexgpt-lite/latest",
+            "completionOptions": {
+                "stream": False,
+                "temperature": 0.3,
+                "maxTokens": 100
+            },
+            "messages": [
+                {
+                    "role": "user",
+                    "text": prompt
+                }
+            ]
+        }
+        
+        logger.info(f"Translating to {lang_name}...")
+        
+        res = requests.post(
+            url,
+            headers=headers,
+            json=payload,
+            timeout=20
+        )
+        
+        if res.status_code != 200:
+            logger.error(f"Translation error: {res.status_code} - {res.text}")
+            raise Exception(f"YandexGPT returned {res.status_code}")
+        
+        response_data = res.json()
+        translation = response_data['result']['alternatives'][0]['message']['text'].strip()
+        
+        # Clean up
+        for bad in ['"', '«', '»', '\n']:
+            translation = translation.replace(bad, '')
+        
+        logger.info(f"Translated to {lang_name}: {translation}")
+        return translation
+        
+    except Exception as e:
+        logger.error(f"Translation error: {e}")
+        return f"[Translation to {lang_name} failed]"
 
 # Store active quizzes with their expiration time
 active_quizzes = {}
@@ -270,12 +340,17 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not TARGET_CHATS:
         await update.message.reply_text(
             "❌ Нет настроенных чатов для отправки.\n"
-            "Пожалуйста, настройте TARGET_CHATS в коде или TARGET_CHAT_IDS в .env"
+            "Пожалуйста, настройте TARGET_CHATS в коде или TARGET_CHAT_CONFIG в .env"
         )
         return
     
-    # Show which chats will receive sentences
-    chat_list = ", ".join([name for _, name in TARGET_CHATS])
+    # Show which chats will receive sentences with their language configs
+    chat_descriptions = []
+    for _, name, langs in TARGET_CHATS:
+        lang_str = "+".join(langs).upper()
+        chat_descriptions.append(f"{name} ({lang_str})")
+    
+    chat_list = ", ".join(chat_descriptions)
     await update.message.reply_text(f"⏳ Генерирую предложения для: {chat_list}...")
     
     prompts = random.sample(GRAMMAR_STRUCTURES, 6)
@@ -334,18 +409,38 @@ async def send_sentence(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sentences = quiz_data['sentences']
         
         if 0 <= idx < len(sentences):
-            # Send to ALL target chats
+            russian_sentence = sentences[idx]
+            
+            # Send to ALL target chats with their language configurations
             sent_to = []
             failed = []
             
-            for target_id, student_name in TARGET_CHATS:
+            for target_id, student_name, langs in TARGET_CHATS:
                 try:
-                    await context.bot.send_message(
-                        chat_id=target_id,
-                        text=sentences[idx]
-                    )
-                    sent_to.append(student_name)
-                    logger.info(f"Sentence {idx} sent to {student_name} ({target_id})")
+                    # Send sentence in each configured language
+                    for lang_code in langs:
+                        if lang_code == "ru":
+                            # Send Russian
+                            await context.bot.send_message(
+                                chat_id=target_id,
+                                text=russian_sentence
+                            )
+                        else:
+                            # Translate and send
+                            translated = translate_sentence(russian_sentence, lang_code)
+                            await context.bot.send_message(
+                                chat_id=target_id,
+                                text=translated
+                            )
+                        
+                        # Small delay between messages to same chat
+                        if len(langs) > 1:
+                            await asyncio.sleep(0.5)
+                    
+                    lang_str = "+".join(langs).upper()
+                    sent_to.append(f"{student_name} ({lang_str})")
+                    logger.info(f"Sentence {idx} sent to {student_name} ({target_id}) in {langs}")
+                    
                 except Exception as e:
                     failed.append(student_name)
                     logger.error(f"Failed to send to {student_name} ({target_id}): {e}")
@@ -377,7 +472,7 @@ async def send_sentence(update: Update, context: ContextTypes.DEFAULT_TYPE):
             confirmation = f"✅ Отправлено в {len(sent_to)} чатов"
             if failed:
                 confirmation += f" (не удалось: {len(failed)})"
-            confirmation += f": _{sentences[idx]}_"
+            confirmation += f": _{russian_sentence}_"
             
             await context.bot.send_message(
                 chat_id=chat_id,
