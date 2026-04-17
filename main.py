@@ -166,31 +166,36 @@ def generate_russian_sentences_batch(structures: list) -> list:
         frames += random.choices(SYNTACTIC_FRAMES, k=n - len(frames))
 
     numbered_tasks = "\n".join(
-        f"{i+1}. Grammar structure: {s}\n   Topic: {topics[i]}\n   Syntactic frame: {frames[i]}"
+        f"{i+1}. TARGET GRAMMAR (must be the main clause): {s}\n"
+        f"   Topic (weave in naturally): {topics[i]}\n"
+        f"   Variety hint (optional, only if it doesn't weaken the grammar): {frames[i]}"
         for i, s in enumerate(structures)
     )
 
-    prompt = f"""You are a Russian language teacher creating example sentences for an English-speaking student (A2-B1 level).
+    prompt = f"""You are a Russian language teacher writing example sentences for an English-speaking A2-B1 student.
 
-Write {n} Russian sentences. Each one demonstrates a different English grammar structure (translated into natural Russian).
+The student is studying SIX specific English grammar structures. Your sentences must translate these structures into natural Russian, and each Russian sentence must CLEARLY demonstrate its target structure — a teacher should be able to look at the Russian sentence and immediately recognise which English grammar it's showing.
 
+TASKS:
 {numbered_tasks}
 
-CRITICAL VARIETY RULES — read carefully:
-- Each sentence MUST start with a DIFFERENT word. No two sentences may share their first word.
-- Follow the syntactic frame given for each sentence.
-- Vary grammatical subjects across the set: mix "я", "мы", "ты", "они", "он", "она", impersonal forms, and noun subjects.
-- Do NOT use the same sentence skeleton twice. If sentence 1 is "Вчера я X", sentence 2 must not be "Вчера я Y".
-- Simple, everyday A2-B1 vocabulary only.
-- Natural-sounding Russian, not word-for-word translation from English.
+PRIORITY ORDER (most important first):
+1. The TARGET GRAMMAR must be the MAIN CLAUSE of the sentence — not hidden inside a subordinate clause or a reported/indirect structure.
+2. The Russian must match the exact grammar: for conditionals use "бы" correctly; for passives use the passive voice not an active workaround; for "wish" use "жаль, что..." or "хотел бы, чтобы..."; for "should have" use "надо было / должен был + infinitive"; for "must have" use "наверное + past" or "должно быть"; for "the more... the more..." use "чем... тем..."; for comparisons use "не такой ... как" / "гораздо ... чем".
+3. Only then, apply the variety hint if it fits. If the hint would bury the grammar in a subordinate clause, IGNORE THE HINT and use a simpler structure that showcases the grammar.
+4. Across the 6 sentences, no two may start with the same word. Vary subjects (я, мы, ты, они, он, она, impersonal, noun subjects).
+5. A2-B1 vocabulary only. Natural Russian, not calques from English.
 
-OUTPUT FORMAT — follow exactly:
+SELF-CHECK before outputting each sentence — ask yourself:
+- "If a teacher saw only my Russian sentence, would they immediately identify the target English grammar?"
+- If the answer is no, REWRITE that sentence with the grammar in the main clause.
+
+OUTPUT FORMAT (follow exactly):
 1. <Russian sentence>
 2. <Russian sentence>
-3. <Russian sentence>
 ...
 
-No explanations, no English, no quotation marks. Just numbered Russian sentences."""
+No explanations, no English, no quotation marks, no bold. Just numbered Russian sentences."""
 
     try:
         url = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
