@@ -16,9 +16,11 @@ load_dotenv()
 
 # --- Configuration ---
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
-YANDEX_FOLDER_ID = os.getenv("YANDEX_FOLDER_ID")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 REMINDER_CHAT_ID = os.getenv("REMINDER_CHAT_ID")
+
+DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions"
+DEEPSEEK_MODEL = "deepseek-chat"
 
 # --- TARGET CHATS CONFIGURATION ---
 TARGET_CHATS = []
@@ -48,74 +50,51 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- Grammar Structures ---
+# --- Grammar Structures (narrowed to Elena's current focus) ---
+# Conditionals 1/2/3, wish (present + past regret), modals of speculation
+# (past + present), comparatives (not quite as / not nearly as),
+# "the sooner the better".
 GRAMMAR_STRUCTURES = [
-    "Not nearly as... as: This car is not nearly as fast as that one.",
-    "Not quite as... as: This car is not quite as fast as that one.",
-    "Passive simple past: Where was this food sold?",
-    "Passive simple future: Where will this food be sold?",
-    "Second conditional: If I knew French, I would watch French films.",
-    "Third conditional: If I had studied, I would have passed.",
-    "Mixed conditional: If I had eaten, I wouldn't be hungry now.",
+    "First conditional: If it rains, we will stay at home.",
+    "Second conditional: If I had more time, I would learn Spanish.",
+    "Third conditional: If I had studied, I would have passed the exam.",
     "Wish (present regret): I wish I had more time.",
-    "Passive (present continuous): The house is being painted at the moment.",
-    "Should have + past participle: You should have studied harder.",
-    "I could never get used to + -ing: I could never get used to living alone.",
-    "The more... the more...: The more you read, the more you learn.",
-    "Must have + past participle: He must have been lying.",
-    "I wish I had + past participle: I wish I had gone to the party.",
-    "Worth + -ing: It's worth visiting this museum."
+    "Wish (past regret): I wish I had gone to the party yesterday.",
+    "Must have + past participle (speculation about past): She must have forgotten.",
+    "Might have + past participle (speculation about past): He might have left already.",
+    "Must + infinitive (speculation about present): She must be tired.",
+    "Might + infinitive (speculation about present): He might be at home.",
+    "Not quite as ... as ...: This coffee is not quite as strong as the last one.",
+    "Not nearly as ... as ...: My old phone is not nearly as fast as the new one.",
+    "The sooner the better: We should book the tickets — the sooner the better.",
 ]
 
-# --- Topics as NOUN PHRASES (not gerunds) — lets the model vary syntax ---
+# --- Topics as NOUN PHRASES — kept simple and everyday for Elena (A2) ---
 TOPIC_CATEGORIES = [
-    # Food & Cooking
-    ["pancakes", "homemade bread", "borscht", "sushi", "shashlik",
-     "dumplings", "strawberry jam", "pizza delivery", "a watermelon", "pickled cucumbers"],
-    # Nature & Outdoors
-    ["a sunset", "pigeons in the park", "wild mushrooms", "forest berries", "tomato seedlings",
-     "rain", "the first snow", "a thunderstorm", "a hedgehog", "the river bank"],
+    # Food & Cooking — very basic
+    ["soup", "tea", "a cake", "breakfast", "an apple",
+     "dinner", "coffee", "bread", "ice cream", "pizza"],
+    # Nature & Weather — simple
+    ["rain", "snow", "the sun", "the wind", "a flower",
+     "the sea", "a cat in the yard", "the park", "a dog", "summer"],
     # Home & Daily Life
-    ["new furniture", "a leaky tap", "a freshly painted wall", "lost keys", "new curtains",
-     "the balcony", "a broken lightbulb", "old photos", "an old letter", "a messy wardrobe"],
-    # People & Relationships
-    ["grandmother", "the neighbour", "a classmate", "an older brother",
-     "an old friend", "a pen pal", "a colleague", "a lost tourist",
-     "a nephew", "a sad friend"],
+    ["new shoes", "the keys", "a book", "the TV", "a phone",
+     "the bus", "the kitchen", "a chair", "a lamp", "a clock"],
+    # People
+    ["mum", "dad", "a friend", "the neighbour", "a colleague",
+     "my sister", "my brother", "the doctor", "a child", "grandma"],
     # Travel & Transport
-    ["the last bus", "the wrong train", "the airport", "an unfamiliar city",
-     "a cheap hostel", "a bicycle", "a hitchhiking trip", "a night train", "a lost passport",
-     "a new neighbourhood"],
-    # Hobbies & Entertainment
-    ["knitting", "a chess game", "an old film", "a concert", "pottery class",
-     "juggling", "a detective novel", "a jigsaw puzzle", "origami", "the museum"],
-    # Health & Sport
-    ["jogging", "the gym", "a pulled muscle", "drinking water", "swimming lessons",
-     "yoga", "a steep hill", "table tennis", "a bad cold", "a long walk"],
+    ["the bus", "a taxi", "the train", "the airport", "a holiday",
+     "the metro", "a small hotel", "the beach", "the road", "a map"],
     # Work & Study
-    ["a deadline", "overtime at work", "a presentation", "a new program",
-     "an online course", "a difficult essay", "a failed exam", "a promotion", "a new job",
-     "an internship"],
-    # Technology & Modern Life
-    ["a phone charger", "a forgotten password", "a new laptop", "a video call",
-     "short videos", "a new phone", "old files", "a software update",
-     "a TV series", "the printer"],
-    # Seasons & Celebrations
-    ["the New Year tree", "flowers for 8 March", "fireworks", "the dacha",
-     "a snowman", "a Christmas tree", "a birthday picnic", "the ice rink",
-     "graduation", "a school play"],
-]
-
-# --- Syntactic frames to force structural variety ---
-SYNTACTIC_FRAMES = [
-    "Start with a time adverbial (Вчера, Обычно, На прошлой неделе, etc.)",
-    "Start with the subject (я, мы, ты, он, она, они)",
-    "Start with a subordinate clause (Когда..., Если..., Хотя...)",
-    "Use an impersonal construction (Было, Можно, Нужно, Стоит...)",
-    "Start with a place adverbial (В парке, На кухне, У бабушки...)",
-    "Start with an object or complement (Этот фильм..., Такую погоду...)",
-    "Use a question form",
-    "Start with a participle or adverbial participle (Проснувшись..., Сидя...)",
+    ["work", "a meeting", "homework", "an email", "a phone call",
+     "the office", "a report", "a course", "a teacher", "a lesson"],
+    # Hobbies & Free Time
+    ["a walk", "a film", "music", "a book", "a game",
+     "a photo", "the radio", "tennis", "yoga", "dancing"],
+    # Health
+    ["a headache", "vitamins", "water", "sleep", "fresh air",
+     "a cold", "running", "the gym", "a long walk", "good food"],
 ]
 
 recent_topics_used = []
@@ -124,12 +103,10 @@ MAX_RECENT = 30
 
 def get_unique_topics(n: int) -> list:
     """Pick N topics that haven't been used recently, preferring different categories."""
-    # Try to draw one from each category first for maximum variety
     available_by_cat = [
         [t for t in cat if t not in recent_topics_used]
         for cat in TOPIC_CATEGORIES
     ]
-    # Drop empty categories
     available_by_cat = [cat for cat in available_by_cat if cat]
 
     picked = []
@@ -139,7 +116,6 @@ def get_unique_topics(n: int) -> list:
             break
         picked.append(random.choice(cat))
 
-    # If we still need more, draw from the general pool
     if len(picked) < n:
         all_available = [t for cat in TOPIC_CATEGORIES for t in cat
                          if t not in recent_topics_used and t not in picked]
@@ -156,41 +132,73 @@ def get_unique_topics(n: int) -> list:
     return picked
 
 
-# --- BATCHED generation: all 6 sentences in ONE API call ---
+def _call_deepseek(prompt: str, temperature: float = 0.8, max_tokens: int = 600) -> str:
+    """Call DeepSeek chat completions and return the assistant text."""
+    headers = {
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": DEEPSEEK_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": False
+    }
+    res = requests.post(DEEPSEEK_URL, headers=headers, json=payload, timeout=60)
+    if res.status_code != 200:
+        logger.error(f"DeepSeek error: {res.status_code} - {res.text}")
+        raise Exception(f"DeepSeek returned {res.status_code}")
+    data = res.json()
+    return data["choices"][0]["message"]["content"].strip()
+
+
+# --- BATCHED generation: all N sentences in ONE API call ---
 def generate_russian_sentences_batch(structures: list) -> list:
-    """Generate N Russian sentences in a single call with strong anti-repetition framing."""
+    """Generate N Russian sentences in a single call. EASY level for Elena (A2)."""
     n = len(structures)
     topics = get_unique_topics(n)
-    frames = random.sample(SYNTACTIC_FRAMES, min(n, len(SYNTACTIC_FRAMES)))
-    if len(frames) < n:
-        frames += random.choices(SYNTACTIC_FRAMES, k=n - len(frames))
 
     numbered_tasks = "\n".join(
         f"{i+1}. TARGET GRAMMAR (must be the main clause): {s}\n"
-        f"   Topic (weave in naturally): {topics[i]}\n"
-        f"   Variety hint (optional, only if it doesn't weaken the grammar): {frames[i]}"
+        f"   Topic (weave in naturally): {topics[i]}"
         for i, s in enumerate(structures)
     )
 
-    prompt = f"""You are a Russian language teacher writing example sentences for an English-speaking A2-B1 student.
-
-The student is studying SIX specific English grammar structures. Your sentences must translate these structures into natural Russian, and each Russian sentence must CLEARLY demonstrate its target structure — a teacher should be able to look at the Russian sentence and immediately recognise which English grammar it's showing.
+    prompt = f"""You are writing SHORT, EASY Russian sentences for a real-beginner adult student (A2 level).
+The student translates them into English to practise SPECIFIC English grammar.
+Recently she said the sentences feel too hard and complicated, so this round must feel FRIENDLY and DOABLE.
 
 TASKS:
 {numbered_tasks}
 
-PRIORITY ORDER (most important first):
-1. The TARGET GRAMMAR must be the MAIN CLAUSE of the sentence — not hidden inside a subordinate clause or a reported/indirect structure.
-2. The Russian must match the exact grammar: for conditionals use "бы" correctly; for passives use the passive voice not an active workaround; for "wish" use "жаль, что..." or "хотел бы, чтобы..."; for "should have" use "надо было / должен был + infinitive"; for "must have" use "наверное + past" or "должно быть"; for "the more... the more..." use "чем... тем..."; for comparisons use "не такой ... как" / "гораздо ... чем".
-3. Only then, apply the variety hint if it fits. If the hint would bury the grammar in a subordinate clause, IGNORE THE HINT and use a simpler structure that showcases the grammar.
-4. Across the 6 sentences, no two may start with the same word. Vary subjects (я, мы, ты, они, он, она, impersonal, noun subjects).
-5. A2-B1 vocabulary only. Natural Russian, not calques from English.
+HARD RULES — follow ALL of them:
+1. SHORT. Each sentence MUST be 6–12 words. No long sentences. No nested clauses.
+2. SIMPLE everyday vocabulary only — words a beginner adult knows (food, family, home, weather, work, transport, hobbies).
+3. The TARGET GRAMMAR is the MAIN CLAUSE — never hidden inside a subordinate or reported structure.
+4. NO literary, formal, or "tricky" wording. Plain, conversational Russian, like spoken in normal life.
+5. No idioms. No proverbs. No rare vocabulary. No abstract topics.
+6. Use the right Russian construction for each English grammar:
+   - First conditional → "Если + present, будущее" (Если пойдёт дождь, мы останемся дома.)
+   - Second conditional → "Если бы + past, past + бы" (Если бы у меня было время, я бы выучила испанский.)
+   - Third conditional → "Если бы + past (perfective), past + бы" referring to the past (Если бы я позанималась, я бы сдала экзамен.)
+   - Wish (present) → "Жаль, что у меня нет ..." or "Хотела бы я иметь больше времени."
+   - Wish (past) → "Жаль, что я не пошла ..." (regret about something that already happened)
+   - Must have (past speculation) → "Наверное, она забыла." / "Должно быть, он ушёл."
+   - Might have (past speculation) → "Возможно, он уже ушёл." / "Может быть, она забыла."
+   - Must (present speculation) → "Наверное, она устала." / "Должно быть, он дома."
+   - Might (present speculation) → "Возможно, он дома." / "Может быть, она устала."
+   - Not quite as ... as ... → "Этот кофе не такой крепкий, как прошлый." (small difference)
+   - Not nearly as ... as ... → "Мой старый телефон совсем не такой быстрый, как новый." (big difference)
+   - "The sooner the better" → "Чем раньше, тем лучше."
+7. Across the {n} sentences, no two may start with the same word. Mix subjects (я, мы, ты, он, она, они, impersonal).
 
-SELF-CHECK before outputting each sentence — ask yourself:
-- "If a teacher saw only my Russian sentence, would they immediately identify the target English grammar?"
-- If the answer is no, REWRITE that sentence with the grammar in the main clause.
+SELF-CHECK before outputting each sentence:
+- Is it 6–12 words? If longer, SHORTEN it.
+- Is the target grammar obvious in the main clause? If not, REWRITE.
+- Could a real A2 beginner translate this without panicking? If not, SIMPLIFY.
 
-OUTPUT FORMAT (follow exactly):
+OUTPUT FORMAT (follow exactly, nothing else):
 1. <Russian sentence>
 2. <Russian sentence>
 ...
@@ -198,36 +206,10 @@ OUTPUT FORMAT (follow exactly):
 No explanations, no English, no quotation marks, no bold. Just numbered Russian sentences."""
 
     try:
-        url = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
-        headers = {
-            "Authorization": f"Api-Key {YANDEX_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            # Using the full yandexgpt model (not lite) — much better at variety
-            "modelUri": f"gpt://{YANDEX_FOLDER_ID}/yandexgpt/latest",
-            "completionOptions": {
-                "stream": False,
-                "temperature": 0.9,
-                "maxTokens": 600
-            },
-            "messages": [
-                {"role": "user", "text": prompt}
-            ]
-        }
-
-        logger.info(f"Calling YandexGPT (batch of {n}) | Topics: {topics}")
-        res = requests.post(url, headers=headers, json=payload, timeout=40)
-
-        if res.status_code != 200:
-            logger.error(f"YandexGPT error: {res.status_code} - {res.text}")
-            raise Exception(f"YandexGPT returned {res.status_code}")
-
-        response_data = res.json()
-        raw = response_data['result']['alternatives'][0]['message']['text'].strip()
+        logger.info(f"Calling DeepSeek (batch of {n}) | Topics: {topics}")
+        raw = _call_deepseek(prompt, temperature=0.8, max_tokens=600)
         logger.info(f"Raw batch output:\n{raw}")
 
-        # Parse numbered lines: "1. sentence", "2. sentence", ...
         sentences = []
         for line in raw.split('\n'):
             line = line.strip()
@@ -252,62 +234,45 @@ No explanations, no English, no quotation marks, no bold. Just numbered Russian 
         return [random.choice(FALLBACK_SENTENCES) for _ in range(n)]
 
 
+# Fallback sentences — short, easy, target Elena's specific grammar list.
 FALLBACK_SENTENCES = [
-    "Если бы я позвонил бабушке вчера, она была бы рада.",
-    "Я собираюсь навестить друга в больнице завтра.",
-    "Этот телефон намного удобнее, чем мой старый.",
-    "Эта книга не такая интересная, как та.",
-    "Если пойдёт снег, мы слепим снеговика.",
-    "Ты когда-нибудь пробовал узбекскую кухню?",
-    "На прошлой неделе нам покрасили стены в квартире.",
-    "Жаль, что я не взял зонт сегодня утром.",
-    "Вчера в парке кормили уток целый час.",
-    "Хотя шёл дождь, мы всё равно пошли гулять."
+    "Если пойдёт дождь, мы останемся дома.",                        # 1st cond
+    "Если бы у меня было время, я бы выучила испанский.",           # 2nd cond
+    "Если бы я позанималась, я бы сдала экзамен.",                  # 3rd cond
+    "Жаль, что у меня нет больше времени.",                          # wish (present)
+    "Жаль, что я не пошла вчера на вечеринку.",                      # wish (past)
+    "Наверное, она забыла про встречу.",                             # must have
+    "Возможно, он уже ушёл домой.",                                  # might have
+    "Должно быть, она устала после работы.",                         # must (present)
+    "Может быть, он дома сейчас.",                                   # might (present)
+    "Этот кофе не такой крепкий, как прошлый.",                      # not quite as
+    "Мой старый телефон совсем не такой быстрый, как новый.",        # not nearly as
+    "Чем раньше, тем лучше.",                                        # the sooner the better
 ]
 
 
 def translate_sentence(text: str, target_lang: str) -> str:
-    """Translate Russian sentence to target language using YandexGPT."""
+    """Translate Russian sentence to target language using DeepSeek."""
     lang_names = {
         "es": "Spanish", "fr": "French", "de": "German",
-        "it": "Italian", "pt": "Portuguese", "ar": "Arabic", "he": "Hebrew"
+        "it": "Italian", "pt": "Portuguese", "ar": "Arabic", "he": "Hebrew",
+        "en": "English"
     }
     lang_name = lang_names.get(target_lang, target_lang.upper())
 
     prompt = f"""Translate this Russian sentence to {lang_name}.
-Use simple, everyday vocabulary (A2-B1 level).
-Output ONLY the translated sentence, nothing else.
+Use simple, everyday A2-level vocabulary.
+Keep it short and natural.
+Output ONLY the translated sentence, nothing else — no quotes, no notes.
 
 Russian: {text}"""
 
     try:
-        url = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
-        headers = {
-            "Authorization": f"Api-Key {YANDEX_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "modelUri": f"gpt://{YANDEX_FOLDER_ID}/yandexgpt/latest",
-            "completionOptions": {
-                "stream": False,
-                "temperature": 0.3,
-                "maxTokens": 150
-            },
-            "messages": [{"role": "user", "text": prompt}]
-        }
-
-        res = requests.post(url, headers=headers, json=payload, timeout=20)
-        if res.status_code != 200:
-            logger.error(f"Translation error: {res.status_code} - {res.text}")
-            raise Exception(f"YandexGPT returned {res.status_code}")
-
-        response_data = res.json()
-        translation = response_data['result']['alternatives'][0]['message']['text'].strip()
+        translation = _call_deepseek(prompt, temperature=0.3, max_tokens=150)
         for bad in ['"', '«', '»', '\n']:
             translation = translation.replace(bad, '')
-
         logger.info(f"Translated to {lang_name}: {translation}")
-        return translation
+        return translation.strip()
 
     except Exception as e:
         logger.error(f"Translation error: {e}")
@@ -352,7 +317,6 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"⏳ Генерирую предложения для: {chat_list}...")
 
     prompts = random.sample(GRAMMAR_STRUCTURES, 6)
-    # ONE call for all 6 sentences instead of 6 separate calls
     sentences = generate_russian_sentences_batch(prompts)
 
     active_quizzes[chat_id] = {
